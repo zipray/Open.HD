@@ -4,6 +4,81 @@ function tmessage {
     fi
 }
 
+function detect_hardware {
+	HARDWARE=$(cat /proc/cpuinfo | grep 'Revision' | awk '{print $3}')
+
+		  echo "Found hardware $HARDWARE..."
+		  
+		  case "$HARDWARE" in
+                       '29020e0')
+		        ABLE_BAND=ag
+			MODEL=3a+
+			;;
+                       '2a02082')
+		        ABLE_BAND=g
+			MODEL=3b
+			;;
+			'2a22082')
+		        ABLE_BAND=g
+			MODEL=3b
+			;;
+			'2a32082')
+		        ABLE_BAND=g
+			MODEL=3b
+			;;		
+			'2a52082')
+		        ABLE_BAND=g
+			MODEL=3b
+			;;	
+                       '2a020d3')
+		        ABLE_BAND=ag
+			MODEL=3b+
+			;;
+			'2900092')
+		        ABLE_BAND=none
+			MODEL=Zero
+			;;
+			'2900093')
+		        ABLE_BAND=none
+			MODEL=Zero
+			;;
+			'29000c1')
+		        ABLE_BAND=ag
+			MODEL=ZeroW
+			;;
+			'2920092')
+		        ABLE_BAND=none
+			MODEL=Zero
+			;;
+			'2920093')
+		        ABLE_BAND=none
+			MODEL=Zero
+			;;
+			'2a22042')
+		        ABLE_BAND=none
+			MODEL=2b
+			;;
+			'2a21041')
+		        ABLE_BAND=none
+			MODEL=2b
+			;;
+			'2a01041')
+		        ABLE_BAND=none
+			MODEL=2b
+			;;
+			'2a01040')
+		        ABLE_BAND=none
+			MODEL=2b
+			;;
+			*)
+			ABLE_BAND=unknown
+			MODEL=unknown
+			;;
+	          esac
+		echo "This pi model is $MODEL..."
+}
+
+
 function check_exitstatus {
     STATUS=$1
     case $STATUS in
@@ -500,7 +575,7 @@ function detect_nics {
 
     if [ "$CAM" == "0" ]; then # only do relay/hotspot stuff if RX
 	    # get wifi hotspot card out of the way
-	    if [ "$WIFI_HOTSPOT" == "Y" ]; then
+	    if [ "$WIFI_HOTSPOT" != "N" ]; then
 			if [ "$WIFI_HOTSPOT_NIC" != "internal" ]; then
 				# only configure it if it's there
 				if ls /sys/class/net/ | grep -q $WIFI_HOTSPOT_NIC; then
