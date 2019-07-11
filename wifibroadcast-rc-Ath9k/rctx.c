@@ -33,8 +33,19 @@
 
 #define SERVER "127.0.0.1"
 #define BUFLEN 2  //Max length of buffer
-#define PORT2 1258 //BandSwitch py script in
+char messageRCEncrypt[40]; //Encrypted RC Message
 
+#define PORT 5566 // Encrypted RC out via SVPCom
+#define PORT2 1258 //BandSwitch py script in
+#define PORT3 1259 //IP or USB camera switch py script in
+
+int NICCount=0;
+
+int TrimChannel=0;
+int Action=0;
+int PWMCount=0;
+int ActivateChannel=0;
+int IsTrimDone[8] =  { 0 };
 
 #ifdef JSSWITCHES  // 1 or 2 byte more for channels 9 - 16/24 as switches
 
@@ -116,10 +127,10 @@ void usage(void)
     printf(
         "rctx by Rodizio. Based on JS2Serial by Oliver Mueller and wbc all-in-one tx by Anemostec. GPL2\n"
         "\n"
-        "Usage: rctx <interfaces>\n"
+        "Usage: rctx rctx ChannelToListen2 ChannelIPCamera IsBandSwitcherEnabled(1\\0) IsIPCameraSwitcherEnabled(1\\0) IsEncrypt(1\\0) $TrimChannel $Action $PWMCount $ActivateChannel $PrimaryCardMAC \n"
         "\n"
         "Example:\n"
-        "  rctx wlan0\n"
+        "  rctx 2 3 1 1 0 wlan0\n"
         "\n");
     exit(1);
 }
@@ -127,6 +138,8 @@ void usage(void)
 static int open_sock (char *ifname) {
     struct sockaddr_ll ll_addr;
     struct ifreq ifr;
+
+    NICCount++;
 
     sock = socket (AF_PACKET, SOCK_RAW, 0);
     if (sock == -1) {
@@ -181,27 +194,35 @@ void readAxis(SDL_Event *event) {
 	switch(myevent.jaxis.axis) {
 		case ROLL_AXIS:
 				rcData[0]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[0]=0;
 			break;
 		case PITCH_AXIS:
 				rcData[1]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[1]=0;
 			break;
 		case THROTTLE_AXIS:
 				rcData[2]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[2]=0;
 			break;
 		case YAW_AXIS:
 				rcData[3]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[3]=0;
 			break;
 		case AUX1_AXIS:
 				rcData[4]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[4]=0;
 			break;
 		case AUX2_AXIS:
 				rcData[5]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[5]=0;
 			break;
 		case AUX3_AXIS:
 				rcData[6]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[6]=0;
 			break;
 		case AUX4_AXIS:
 				rcData[7]=parsetoMultiWii(myevent.jaxis.value);
+				IsTrimDone[7]=0;
 			break;
 		default:
 			break; //do nothing
@@ -259,7 +280,39 @@ void sendRC(unsigned char seqno, telemetry_data_t *td) {
 #endif
 //  printf ("rcdata0:%d\n",rcData[0]);
 
-    if (write(socks[0], &framedata, sizeof(framedata)) < 0 ) { fprintf(stderr, "!"); exit(1); }	/// framedata_s = 28 or 29 bytes
+
+        int best_adapter = 0;
+    	if(td->rx_status != NULL)
+	{
+		int j = 0;
+		int ac = td->rx_status->wifi_adapter_cnt;
+		int best_dbm = -1000;
+
+	// find out which card has best signal and ignore ralink (type=1) ones
+		for(j=0; j<ac; ++j)
+		{
+			if ((best_dbm < td->rx_status->adapter[j].current_signal_dbm)&&(td->rx_status->adapter[j].type == 0))
+			{
+				best_dbm = td->rx_status->adapter[j].current_signal_dbm;
+				best_adapter = j;
+			//printf ("best_adapter: :%d\n",best_adapter);
+		   	}
+		}
+//	printf ("bestadapter: %d (%d dbm)\n",best_adapter, best_dbm);
+		if(NICCount == 1)
+		{
+			 if (write(socks[0], &framedata, sizeof(framedata)) < 0 ) { fprintf(stderr, "!"); exit(1); }
+		}
+		else
+		{
+			if (write(socks[best_adapter], &framedata, sizeof(framedata)) < 0 ) { fprintf(stderr, "!"); exit(1); }	/// framedata_s = 28 or 29 bytes
+		}
+	}
+	else
+	{
+		printf ("ERROR: Could not open rx status memory!");
+	}
+
 }
 
 
@@ -300,6 +353,89 @@ void telemetry_init(telemetry_data_t *td) {
 }
 
 
+void packMessage(int seqno)
+{
+	messageRCEncrypt[0] = rcData[0] & 0xFF;
+	messageRCEncrypt[1] = rcData[0] >> 8;
+
+        messageRCEncrypt[2] = rcData[1] & 0xFF;
+        messageRCEncrypt[3] = rcData[1] >> 8;
+
+        messageRCEncrypt[4] = rcData[2] & 0xFF;
+        messageRCEncrypt[5] = rcData[2] >> 8;
+
+        messageRCEncrypt[6] = rcData[3] & 0xFF;
+        messageRCEncrypt[7] = rcData[3] >> 8;
+
+        messageRCEncrypt[8] = rcData[4] & 0xFF;
+        messageRCEncrypt[9] = rcData[4] >> 8;
+
+        messageRCEncrypt[10] = rcData[5] & 0xFF;
+        messageRCEncrypt[11] = rcData[5] >> 8;
+
+        messageRCEncrypt[12] = rcData[6] & 0xFF;
+        messageRCEncrypt[13] = rcData[6] >> 8;
+
+        messageRCEncrypt[14] = rcData[7] & 0xFF;
+        messageRCEncrypt[15] = rcData[7] >> 8;
+ 	//int sizeinbyte = sizeof(ChannelToListen);
+        //unsigned int  under RPi2 = 2 byte
+
+        messageRCEncrypt[16] = seqno & 0xFF;
+        messageRCEncrypt[17] = seqno >> 8;
+	messageRCEncrypt[18] = 0;
+	#ifdef JSSWITCHES
+//      		framedata.switches = rcData[8]; /// channels 9 - 24 as switches
+//        		printf ("rcdata0:%x\t",rcData[8]);
+	messageRCEncrypt[18] = 1;
+	messageRCEncrypt[19] = rcData[8] & 0xFF;
+	messageRCEncrypt[20] = rcData[8] >> 8;
+	#endif
+}
+
+void CheckTrimChannel(int Channel)
+{
+        if(TrimChannel >= 0 && ActivateChannel >= 0)
+        {
+                if(Channel == TrimChannel  )
+                {
+                        if( rcData[ActivateChannel] >= 1850 && IsTrimDone[Channel] == 0 )
+                        {
+				IsTrimDone[Channel] = 1;
+                                if(Action == 1)
+                                {
+                                        rcData[Channel] += PWMCount;
+					if(rcData[Channel] > 1999)
+						rcData[Channel] = 1999;
+                                }
+                                if(Action == 0)
+                                {
+                                        rcData[Channel] -= PWMCount;
+					if(rcData[Channel] < 1000)
+						rcData[Channel] = 1000;
+                                }
+                        }
+			//revers is unselected
+			if( rcData[ActivateChannel] <= 1700 &&  IsTrimDone[Channel] == 1 )
+			{
+				IsTrimDone[Channel] = 0;
+				if(Action == 1)
+                                {
+                                        rcData[Channel] -= PWMCount;
+                                        if(rcData[Channel] < 1000)
+                                                rcData[Channel] = 1000;
+                                }
+                                if(Action == 0)
+                                {
+                                        rcData[Channel] += PWMCount;
+                                        if(rcData[Channel] > 1999 )
+                                                rcData[Channel] = 1999;
+                                }
+			}
+                }
+        }
+}
+
 int main (int argc, char *argv[]) {
     int done = 1;
     int joy_connected = 0;
@@ -308,8 +444,17 @@ int main (int argc, char *argv[]) {
     int shmid;
     char *shared_memory;
     int Channel = 0;
+    int ChannelIPCamera = 0;
+    int IsEncrypt = 0;
+    int IsIPCameraSwitcherEnabled = 0;
+    int IsBandSwitcherEnabled = 0;
     char ShmBuf[2];
     int tmp = 0;
+
+    TrimChannel=0;
+    Action=0;
+    PWMCount=0;
+    ActivateChannel=0;
 
     while (1)
     {
@@ -346,20 +491,58 @@ fprintf( stderr, "init ");
     }
 
     int x = optind;
-    x++;
+    x += 9;
+    
     Channel = atoi(argv[1]);
+    ChannelIPCamera = atoi(argv[2]);
 
-    int num_interfaces = 0;
-    while(x < argc && num_interfaces < 8)
+    IsBandSwitcherEnabled = atoi(argv[3]);
+    IsIPCameraSwitcherEnabled = atoi(argv[4]);
+    IsEncrypt =  atoi(argv[5]);
+
+    TrimChannel=atoi(argv[6]);
+    Action=atoi(argv[7]);
+    PWMCount=atoi(argv[8]);
+    ActivateChannel=atoi(argv[9]);
+    TrimChannel--;
+    ActivateChannel--;
+
+    if(IsEncrypt == 0)
     {
-	socks[num_interfaces] = open_sock(argv[x]);
-	++num_interfaces;
-	++x;
-	usleep(20000); // wait a bit between configuring interfaces to reduce Atheros and Pi USB flakiness
+        int num_interfaces = 0;
+        while(x < argc && num_interfaces < 8)
+        {
+	    socks[num_interfaces] = open_sock(argv[x]);
+	    ++num_interfaces;
+	    ++x;
+	    usleep(20000); // wait a bit between configuring interfaces to reduce Atheros and Pi USB flakiness
+        }
     }
 
+        //UDP RC Encrypted init
+        struct sockaddr_in si_otherRCEncrypt;
+        int sRCEncrypt, iRCEncrypt, slenRCEncrypt = sizeof(si_otherRCEncrypt);
+        
 
-        //udp init
+        if ((sRCEncrypt = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+        {
+                perror(sRCEncrypt);
+                exit(1);
+        }
+
+        memset((char *) &si_otherRCEncrypt, 0, sizeof(si_otherRCEncrypt));
+        si_otherRCEncrypt.sin_family = AF_INET;
+        si_otherRCEncrypt.sin_port = htons(PORT);
+
+        if (inet_aton(SERVER, &si_otherRCEncrypt.sin_addr) == 0)
+        {
+                fprintf(stderr, "inet_aton() failed\n");
+                exit(1);
+        }
+	//udp init end
+
+
+        //udp Band switcher init
         struct sockaddr_in si_other2;
         int s2, slen2 = sizeof(si_other2);
         char message2[BUFLEN];
@@ -380,7 +563,26 @@ fprintf( stderr, "init ");
         }
         //udp init end
 
+        //udp init IP or USB camera sender
+        struct sockaddr_in si_other3;
+        int s3, slen3 = sizeof(si_other3);
+        char message3[BUFLEN];
 
+        if ((s3 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+        {
+                exit(1);
+        }
+
+        memset((char *) &si_other3, 0, sizeof(si_other3));
+        si_other3.sin_family = AF_INET;
+        si_other3.sin_port = htons(PORT3);
+
+        if (inet_aton(SERVER, &si_other3.sin_addr) == 0)
+        {
+                fprintf(stderr, "inet_aton() failed\n");
+                exit(1);
+        }
+        //udp init end
 
 	framedata.rt1 = 0; // <-- radiotap version
 	framedata.rt2 = 0; // <-- radiotap version
@@ -455,18 +657,39 @@ fprintf( stderr, "init ");
 	int counter = 0;
 	int seqno = 0;
 	int k = 0;
-	while (done) {
+	while (done)
+	{
 		done = eventloop_joystick();
 //		fprintf(stderr, "eventloop_joystick\n");
-		if (counter % UPDATE_NTH_TIME == 0) {
+
+		if (counter % UPDATE_NTH_TIME == 0)
+                {
+			tmp = TrimChannel;
+			//fprintf(stderr, "TrimChannelPWMBefore: %d \n", rcData[tmp]);
+			CheckTrimChannel(tmp);
+		//	fprintf(stderr, "TrimChannelPWMAfter: %d \n", rcData[tmp]);
 //		    fprintf(stderr, "SendRC\n");
-		    for(k=0; k < TRANSMISSIONS; ++k) {
-			sendRC(seqno,&td);
-			usleep(2000); // wait 2ms between sending multiple frames to lower collision probability
+		    for(k=0; k < TRANSMISSIONS; ++k)
+		    {
+				if(IsEncrypt == 1)
+				{
+					packMessage(seqno);
+					if (sendto(sRCEncrypt, messageRCEncrypt, 21, 0, (struct sockaddr *) &si_otherRCEncrypt, slenRCEncrypt) == -1)
+					{
+                		fprintf(stderr, "sendto() error");
+						exit(1);
+					}
+				}
+				else
+				{
+					sendRC(seqno,&td);
+				}
+				usleep(2000); // wait 2ms between sending multiple frames to lower collision probability
 		    }
 
 		    seqno++;
-                    if( Channel >= 1 && Channel <= 8 )
+			
+            if( Channel >= 1 && Channel <= 8 && IsBandSwitcherEnabled == 1)
 		    {
 			message2[0] = 0;
 			message2[1] = 0;
@@ -475,11 +698,26 @@ fprintf( stderr, "init ");
 			message2[0] = rcData[tmp] & 0xFF;
 			message2[1] = rcData[tmp] >> 8;
 
-                        if (sendto(s2, message2, 2, 0, (struct sockaddr *) &si_other2, slen2) == -1)
+            if (sendto(s2, message2, 2, 0, (struct sockaddr *) &si_other2, slen2) == -1)
 			{
 				//printf("sendto() error");
 			}
 
+                    }
+
+                    if( ChannelIPCamera  >= 1 && ChannelIPCamera  <= 8 && IsIPCameraSwitcherEnabled == 1)
+                    {
+                        message3[0] = 0;
+                        message3[1] = 0;
+                        tmp = ChannelIPCamera;
+                        tmp--;
+                        message3[0] = rcData[tmp] & 0xFF;
+                        message3[1] = rcData[tmp] >> 8;
+
+                        if (sendto(s3, message3, 2, 0, (struct sockaddr *) &si_other3, slen3) == -1)
+                        {
+                                //printf("sendto() error");
+                        }
                     }
 		}
 		if (counter % JOY_CHECK_NTH_TIME == 0) {

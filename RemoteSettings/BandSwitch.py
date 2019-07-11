@@ -27,8 +27,14 @@ PrimaryCardPath = "Non"
 PrimaryCardMAC = "Non"
 ExitRecvThread = 0
 ExitRCThread = 0
+ExitRCThread2 = 0
 
 RC_Value = 0
+RC_Value2 = 0
+CurrentCamera=1
+
+CurrentBandTmp = 0
+CurrentBand = 0
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-PrimaryCardMAC", help="")
@@ -36,6 +42,18 @@ parser.add_argument("-Band5Below", type=int, help="")
 parser.add_argument("-Band10ValueMin", type=int, help="")
 parser.add_argument("-Band10ValueMax", type=int, help="")
 parser.add_argument("-Band20After", type=int, help="")
+
+parser.add_argument("-Camera1ValueMin", type=int, help="")
+parser.add_argument("-Camera1ValueMax", type=int, help="")
+
+parser.add_argument("-Camera2ValueMin", type=int, help="")
+parser.add_argument("-Camera2ValueMax", type=int, help="")
+
+parser.add_argument("-Camera3ValueMin", type=int, help="")
+parser.add_argument("-Camera3ValueMax", type=int, help="")
+
+parser.add_argument("-Camera4ValueMin", type=int, help="")
+parser.add_argument("-Camera4ValueMax", type=int, help="")
 
 
 args = parser.parse_args()
@@ -45,6 +63,25 @@ Band5Below = args.Band5Below
 Band10ValueMin = args.Band10ValueMin
 Band10ValueMax = args.Band10ValueMax
 Band20After = args.Band20After
+
+Camera1ValueMin = args.Camera1ValueMin
+Camera1ValueMax = args.Camera1ValueMax
+Camera2ValueMin = args.Camera2ValueMin
+Camera2ValueMax = args.Camera2ValueMax
+Camera3ValueMin = args.Camera3ValueMin
+Camera3ValueMax = args.Camera3ValueMax
+Camera4ValueMin = args.Camera4ValueMin
+Camera4ValueMax = args.Camera4ValueMax
+
+
+print("Camera1ValueMin: ",Camera1ValueMin )
+print("Camera1ValueMax: ",Camera1ValueMax )
+print("Camera2ValueMin: ",Camera2ValueMin  )
+print("Camera2ValueMax: ",Camera2ValueMax )
+print("Camera3ValueMin: ",Camera3ValueMin )
+print("Camera3ValueMax: ",Camera3ValueMax )
+print("Camera4ValueMin: ",Camera4ValueMin)
+print("Camera4ValueMax: ",Camera4ValueMax )
 
 
 
@@ -77,6 +114,32 @@ def StartRCThreadIn():
 
     RCSock.close()
     ExitRCThread = 2
+
+def StartRCThreadIn2():
+    global RC_Value2
+    global ExitRCThread2
+    UDP_IP = ""
+    UDP_PORT = 1259
+    RCSock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    RCSock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    RCSock.settimeout(1)
+    RCSock.bind((UDP_IP, UDP_PORT))
+
+    while True:
+        try:
+            data, addr = RCSock.recvfrom(1024) # buffer size is 1024 bytes
+            byteArr = bytearray([data[1], data[0]])
+            lock.acquire()
+            RC_Value2 = int.from_bytes( byteArr, byteorder='big')
+            lock.release()
+        except:
+            if ExitRCThread2 == 1:
+                print("RC thread2 exiting...")
+                break
+
+    RCSock.close()
+    ExitRCThread2 = 2
+   
 
 def StartRecvThread():
     global AirBand
@@ -275,6 +338,89 @@ def ExitScript(ExitCode):
     exit(ExitCode)
 
 
+def CheckBandRCValues():
+    global CurrentBand
+    if RC_Value >= Band20After and CurrentBand != 20 and RC_Value != 0:
+        print("Switching to 20...")
+        if SwitchRemoteLocalBandTo(20) == False:
+            ExitScript(2)
+        CurrentBand = 20
+
+    if RC_Value < Band10ValueMax and RC_Value > Band10ValueMin and CurrentBand != 10 and RC_Value != 0:
+        print("Switching to 10...")
+        if SwitchRemoteLocalBandTo(10) == False:
+            ExitScript(2)
+        CurrentBand = 10
+
+    if RC_Value <= Band5Below and CurrentBand != 5 and RC_Value != 0:
+        print("Switching to 5...")
+        if SwitchRemoteLocalBandTo(5) == False:
+            ExitScript(2)
+        CurrentBand = 5
+
+def CheckSecondaryCameraRCValues():
+    global CurrentCamera
+    if RC_Value2 >= Camera1ValueMin and RC_Value2 <= Camera1ValueMax:
+        if CurrentCamera != 1:
+            CurrentCamera = 1
+            for i in range(5):
+                SendDataToAir("RPi")
+            print("Camera: RPi")
+
+            try:
+                if os.path.exists("/tmp/SecondaryCameraActive"):
+                    os.remove("/tmp/SecondaryCameraActive")
+            except Exception as e:
+                print("Remove file error: " +  str(e))
+
+            try:
+                os.system('/tmp/KillForwardRTPMainCamera.sh')
+                os.system('/tmp/KillForwardRTPSecondaryCamera.sh')
+                os.system('/tmp/ForwardRTPMainCamera.sh &')
+            except Exception as e:
+                print("RTP forward. It is ok. File can be missing "  + str(e))
+
+    if RC_Value2 >= Camera2ValueMin and RC_Value2 <= Camera2ValueMax:
+        if CurrentCamera != 2:
+            CurrentCamera = 2
+            print("Camera: RPiAndSecondary")
+            for i in range(5):
+                SendDataToAir("RPiAndSecondary")
+            try:
+                hfile = open("/tmp/SecondaryCameraActive", 'w+')
+                hfile.close()
+            except Exception as e:
+                print("Create file error: " +  str(e))
+            try:
+                os.system('/tmp/KillForwardRTPMainCamera.sh')
+                os.system('/tmp/KillForwardRTPSecondaryCamera.sh')
+                os.system('/tmp/ForwardRTPMainCamera.sh &')
+                os.system('/home/pi/RemoteSettings/Ground/RxForwardSecondaryRTP.sh &')
+            except Exception as e:
+                print("RTP secondary forward exception: " +  str(e))
+
+    if RC_Value2 >= Camera3ValueMin and RC_Value2 <= Camera3ValueMax:
+        if CurrentCamera != 3:
+            CurrentCamera = 3
+            print("Camera: Secondary")
+            for i in range(5):
+                SendDataToAir("Secondary")
+
+            try:
+                hfile = open("/tmp/SecondaryCameraActive", 'w+')
+                hfile.close()
+            except Exception as e:
+                print("Create file error: " +  str(e))
+
+            try:
+                os.system('/tmp/KillForwardRTPMainCamera.sh')
+                os.system('/tmp/KillForwardRTPSecondaryCamera.sh')
+                os.system('/home/pi/RemoteSettings/Ground/RxForwardSecondaryRTPAndDisplayLocally.sh &')
+            except Exception as e:
+                print("RTP secondary forward exception: " +  str(e))
+
+    if RC_Value2 >= Camera4ValueMin and RC_Value2 <= Camera4ValueMax:
+        print("Camera: non")
 
 if FindCardPhyInitPath() == True:
     print("Ok")
@@ -283,6 +429,9 @@ if FindCardPhyInitPath() == True:
 
     RC_UDP_IN_thread = threading.Thread(target=StartRCThreadIn)
     RC_UDP_IN_thread.start()
+
+    RC_UDP_IN_thread2 = threading.Thread(target=StartRCThreadIn2)
+    RC_UDP_IN_thread2.start()
 
     CurrentBandTmp = 0
     CurrentBand = 0
@@ -305,26 +454,21 @@ if FindCardPhyInitPath() == True:
         CurrentBand = 20
     print("CurrentBand: ",CurrentBand)
 
+    CurrentCamera = 1
+
     #Add command line in code
     while True:
-        if RC_Value >= Band20After and CurrentBand != 20 and RC_Value != 0:
-            print("Switching to 20...")
-            if SwitchRemoteLocalBandTo(20) == False:
-                ExitScript(2)
-            CurrentBand = 20
+        CheckBandRCValues()
+        CheckSecondaryCameraRCValues()
 
-        if RC_Value < Band10ValueMax and RC_Value > Band10ValueMin and CurrentBand != 10 and RC_Value != 0:
-            print("Switching to 10...")
-            if SwitchRemoteLocalBandTo(10) == False:
-                ExitScript(2)
-            CurrentBand = 10
-
-        if RC_Value <= Band5Below and CurrentBand != 5 and RC_Value != 0:
-            print("Switching to 5...")
-            if SwitchRemoteLocalBandTo(5) == False:
-                ExitScript(2)
-            CurrentBand = 5
         sleep(0.6)
 
 else:
-    print("Exit")
+    print("Ath9k card not found. Band switch disabled. USB\IP camera switch still enabled.")
+
+    RC_UDP_IN_thread2 = threading.Thread(target=StartRCThreadIn2)
+    RC_UDP_IN_thread2.start()
+
+    while True:
+        CheckSecondaryCameraRCValues()
+        sleep(0.6)

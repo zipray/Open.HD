@@ -15,9 +15,14 @@ function MAIN_HOTSPOT_FUNCTION {
 			echo
 			echo "Video running, starting hotspot processes ..."
 			
+
 			sleep 1
-			
+
+			# Convert hostap config from DOS format to UNIX format
+	                ionice -c 3 nice dos2unix -n /boot/apconfig.txt /tmp/apconfig.txt
+					
 			hotspot_check_function
+			
 	    else
 			echo "Check hotspot function not enabled in config file"
 			sleep 365d
@@ -31,9 +36,7 @@ function MAIN_HOTSPOT_FUNCTION {
 
 function hotspot_check_function {
     
-	# Convert hostap config from DOS format to UNIX format
-	ionice -c 3 nice dos2unix -n /boot/apconfig.txt /tmp/apconfig.txt
-			
+	
 	if [ "$ETHERNET_HOTSPOT" == "Y" ]; then
 	    # setup hotspot on RPI3 internal ethernet chip
 	    nice ifconfig eth0 192.168.1.1 up
@@ -42,17 +45,17 @@ function hotspot_check_function {
 
 	if [ "$WIFI_HOTSPOT" != "N" ]; then
 			
-	         # Detect cpu revision pi
-		  detect_hardware
+		# Detect cpu revision pi
+		detect_hardware
 
-			echo "This Pi model $MODEL with Band $ABLE_BAND"
+		echo "This Pi model $MODEL with Band $ABLE_BAND"
 	
 		# CONTINUE IF WE ARE ABLE_BAND IS A or G
 		if [ "$ABLE_BAND" != "unknown" ]; then
 			echo "Setting up Hotspot..."
 
 	    		# Read if hotspot config is auto
-	     		if [ "$WIFI_HOTSPOT" == "auto" ]; then	
+	     		if [ "$WIFI_HOTSPOT" == "auto" ] && [ "$WIFI_HOTSPOT_NIC" == "internal" ]; then	
 				echo "wifihotspot auto..."
 
 	        		# for both a and g ability choose opposite of video	   	         	
@@ -72,33 +75,66 @@ function hotspot_check_function {
 					echo "G Band only capable..."
 					HOTSPOT_BAND=g
 
-					if [ "$FREQ" -gt "2452" ]; then					
+					if [ "$FREQ" -gt "3000" ]; then					
 					HOTSPOT_CHANNEL=1
 					else	         			
-					HOTSPOT_CHANNEL=11
+					echo "Hotspot Disabled. Not recommended to share same band as video..."
+					echo "If you still want hotspot you must manually set up..."
+					#kill the function
+					return 1
 					fi
 				fi
 	     		# NOTHING TO DO For user defined use of A (5.8ghz) OR G (2.4ghz) 
 
 	     		fi
 
-		#populate $hw_mode and channel
-		source /tmp/apconfig.txt
+			#populate $hw_mode and channel
+			source /tmp/apconfig.txt
 
-		sudo sed -i -e "s/hw_mode=$hw_mode/hw_mode=$HOTSPOT_BAND/g" /tmp/apconfig.txt
-		sudo sed -i -e "s/channel=$channel/channel=$HOTSPOT_CHANNEL/g" /tmp/apconfig.txt
+			sudo sed -i -e "s/hw_mode=$hw_mode/hw_mode=$HOTSPOT_BAND/g" /tmp/apconfig.txt
+			sudo sed -i -e "s/channel=$channel/channel=$HOTSPOT_CHANNEL/g" /tmp/apconfig.txt
 
-	    	echo "setting up hotspot with mode $HOTSPOT_BAND on channel $HOTSPOT_CHANNEL"
-		tmessage "setting up hotspot with mode $HOTSPOT_BAND on channel $HOTSPOT_CHANNEL..."
+	    		echo "setting up hotspot with mode $HOTSPOT_BAND on channel $HOTSPOT_CHANNEL"
+			tmessage "setting up hotspot with mode $HOTSPOT_BAND on channel $HOTSPOT_CHANNEL..."
 		
-	    	nice udhcpd -I 192.168.2.1 /etc/udhcpd-wifi.conf
-	    	nice -n 5 hostapd -B -d /tmp/apconfig.txt
+	    		nice udhcpd -I 192.168.2.1 /etc/udhcpd-wifi.conf
+	    		nice -n 5 hostapd -B -d /tmp/apconfig.txt
+
+			# Setup External Hotspot
+			if [ "$WIFI_HOTSPOT_NIC" != "internal" ]; then
+				echo "Setting up external hotspot.."
+				tmessage -n "Setting up external hotspot.."
+				sleep .5
+				ifconfig $WIFI_HOTSPOT_NIC down
+				sleep .5
+				echo "Reducing external hotspot power"
+                                tmessage -n "Reducing external hotspot power"
+				ifconfig $WIFI_HOTSPOT_NIC txpower 1
+				sleep .5
+
+			#This check is disabled. Maybe the path has changed
+			#Right now this bit of code is somewhat redundant with remote settings. But it is broken there
+				# only configure it if it's there
+		    	#	if ls /sys/class/net/ | grep -q $WIFI_HOTSPOT_NIC; then
+					tmessage -n "Setting up $WIFI_HOTSPOT_NIC for Wifi Hotspot operation.."
+					ip link set $WIFI_HOTSPOT_NIC name wifihotspot0 
+					ifconfig wifihotspot0 192.168.2.1 up 
+					tmessage "done!"
+					let "NUM_CARDS--"
+			fi
 
 	  	else
-	     	echo "NO HOTSPOT CAPABILTY WAS FOUND"
-		tmessage "no hotspot hardware found..."
+	     		echo "UKNOWN PI in Hotspot..."
+			tmessage "UNKNOWN PI in Hotspot..."
 	  	fi   
 	fi
+
+        echo "ps -ef | nice grep \"wfb_rx -u $VIDEO_UDP_PORT2 -p 23 -c\" | nice grep -v grep | awk '{print \$2}' | xargs kill -9" >  /tmp/KillForwardRTPSecondaryCamera.sh
+	echo "ps -ef | nice grep \"hello_video.bin.240-befi\" | nice grep -v grep | awk '{print \$2}' | xargs kill -9" >> /tmp/KillForwardRTPSecondaryCamera.sh
+	echo "ps -ef | nice grep \"gst-launch-1.0 udpsrc port=5600\" | nice grep -v grep | awk '{print \$2}' | xargs kill -9" >>  /tmp/KillForwardRTPSecondaryCamera.sh
+	echo "ps -ef | nice grep \"wfb_rx -u 5600 -p 23 -c 127.0.0.1\" | nice grep -v grep | awk '{print \$2}' | xargs kill -9" >> /tmp/KillForwardRTPSecondaryCamera.sh
+
+	chmod +x /tmp/KillForwardRTPSecondaryCamera.sh
 
 	while true; do
 	    # pause loop while saving is in progress
@@ -153,10 +189,27 @@ function hotspot_check_function {
 				nice /home/pi/wifibroadcast-base/rssi_forward $IP 5003 &
 				nice /home/pi/wifibroadcast-base/rssi_qgc_forward $IP 5154 &
 				
+
+
 				if [ "$FORWARD_STREAM" == "rtp" ]; then
-					ionice -c 1 -n 4 nice -n -5 cat /root/videofifo2 | nice -n -5 gst-launch-1.0 fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink port=$VIDEO_UDP_PORT host=$IP > /dev/null 2>&1 &
+					echo "ionice -c 1 -n 4 nice -n -5 cat /root/videofifo2 | nice -n -5 gst-launch-1.0 fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink port=$VIDEO_UDP_PORT host=$IP > /dev/null 2>&1 &" > /tmp/ForwardRTPMainCamera.sh
+					echo "ps -ef | nice grep \"cat /root/videofifo2\" | nice grep -v grep | awk '{print \$2}' | xargs kill -9" >  /tmp/KillForwardRTPMainCamera.sh
+					echo "ps -ef | nice grep \"gst-launch-1.0 fdsrc\" | nice grep -v grep | awk '{print \$2}' | xargs kill -9" >>  /tmp/KillForwardRTPMainCamera.sh
+
 				else
-					ionice -c 1 -n 4 nice -n -10 socat -b $VIDEO_UDP_BLOCKSIZE GOPEN:/root/videofifo2 UDP4-SENDTO:$IP:$VIDEO_UDP_PORT &
+					echo "ionice -c 1 -n 4 nice -n -10 socat -b $VIDEO_UDP_BLOCKSIZE GOPEN:/root/videofifo2 UDP4-SENDTO:$IP:$VIDEO_UDP_PORT &" > /tmp/ForwardRTPMainCamera.sh
+	
+					echo "ps -ef | nice grep \"GOPEN:/root/videofifo2 UDP4-SENDTO\" | nice grep -v grep | awk '{print \$2}' | xargs kill -9" >  /tmp/KillForwardRTPMainCamera.sh
+				fi
+
+				chmod +x /tmp/ForwardRTPMainCamera.sh
+				chmod +x /tmp/KillForwardRTPMainCamera.sh
+
+
+				if [ ! -f "/tmp/SecondaryCameraActive" ]; then
+					/tmp/KillForwardRTPMainCamera.sh
+					/tmp/KillForwardRTPSecondaryCamera.sh
+					/tmp/ForwardRTPMainCamera.sh &
 				fi
 				
 				if cat /boot/osdconfig.txt | grep -q "^#define MAVLINK"; then
