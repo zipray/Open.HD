@@ -1,27 +1,21 @@
 function MAIN_HOTSPOT_FUNCTION {
 	echo "================== CHECK HOTSPOT (tty8) ==========================="
 	if [ "$CAM" == "0" ]; then
-	    if [ "$ETHERNET_HOTSPOT" == "Y" ] || [ "$WIFI_HOTSPOT" != "N" ]; then
-			echo
-			echo -n "Waiting until video is running ..."
-			HVIDEORXRUNNING=0
+		echo -n "Waiting until video is running ..."
+		HVIDEORXRUNNING=0
+	
+		while [ $HVIDEORXRUNNING -ne 1 ]; do
+			sleep 0.5
+			HVIDEORXRUNNING=`pidof $DISPLAY_PROGRAM | wc -w`
+			echo -n "."
+		done
 		
-			while [ $HVIDEORXRUNNING -ne 1 ]; do
-				sleep 0.5
-				HVIDEORXRUNNING=`pidof $DISPLAY_PROGRAM | wc -w`
-				echo -n "."
-			done
-			
-			echo
-			echo "Video running, starting hotspot processes ..."
-			
-			sleep 1
-			
-			hotspot_check_function
-	    else
-			echo "Check hotspot function not enabled in config file"
-			sleep 365d
-	    fi
+		echo
+		echo "Video running, starting hotspot processes ..."
+		
+		sleep 1
+		
+		hotspot_check_function
 	else
 	    echo "Check hotspot function not enabled - we are TX (Air Pi)"
 	    sleep 365d
@@ -41,8 +35,8 @@ function hotspot_check_function {
         #we still can have USB phone connected anytime. So, start programs anyway
         #Maybe add code inside USB tethering file to check  HOTSPOT is off and phone connected - start....
         #if [ "$ETHERNET_HOTSPOT" == "Y" ] || [ "$WIFI_HOTSPOT" != "N" ]; then
-                /home/pi/RemoteSettings/UDPSplitter 9121 5621 5601 &  #Secondary video stream
-                /home/pi/RemoteSettings/UDPSplitter 9120 5620 5600 &  #Main video stream
+                /home/pi/wifibroadcast-scripts/UDPsplitterhelper.sh 9121 5621 $VIDEO_UDP_PORT2 &  #Secondary video stream
+                /home/pi/wifibroadcast-scripts/UDPsplitterhelper.sh 9120 5620 $VIDEO_UDP_PORT &  #Main video stream
 
                 if [ "$FORWARD_STREAM" == "rtp" ]; then
                         echo "ionice -c 1 -n 4 nice -n -5 cat /root/videofifo2 | nice -n -5 gst-launch-1.0 fdsrc ! h264parse ! rtph264pay pt=96 config-interval=5 ! udpsink port=5620 host=127.0.0.1 > /dev/null 2>&1 &" > /tmp/ForwardRTPMainCamera.sh
@@ -55,17 +49,17 @@ function hotspot_check_function {
 
         #redirect telemetry to UDP splitter
         nice socat -b $TELEMETRY_UDP_BLOCKSIZE GOPEN:/root/telemetryfifo2 UDP4-SENDTO:127.0.0.1:6610 &
-        /home/pi/RemoteSettings/UDPSplitter 9122 6610 $TELEMETRY_UDP_PORT &
+        /home/pi/wifibroadcast-scripts/UDPsplitterhelper.sh 9122 6610 $TELEMETRY_UDP_PORT &
 
 
         nice /home/pi/wifibroadcast-base/rssi_forward 127.0.0.1 5003 &
-        /home/pi/RemoteSettings/UDPSplitter 9123 5003 5003 &
+        /home/pi/wifibroadcast-scripts/UDPsplitterhelper.sh 9123 5003 5003 &
 
         nice /home/pi/wifibroadcast-base/rssi_qgc_forward 127.0.0.1 5154 &
-        /home/pi/RemoteSettings/UDPSplitter 9124 5154 5154 &
+        /home/pi/wifibroadcast-scripts/UDPsplitterhelper.sh 9124 5154 5154 &
 
 	##OpenHD RemoteSettings android app
-	/home/pi/RemoteSettings/UDPSplitter 9125 5116 5115 &
+	/home/pi/wifibroadcast-scripts/UDPsplitterhelper.sh 9125 5116 5115 &
 
 
 
@@ -93,7 +87,7 @@ function hotspot_check_function {
 			echo "Setting up Hotspot..."
 
 	    		# Read if hotspot config is auto
-	     		if [ "$WIFI_HOTSPOT" == "auto" ]; then	
+	     		if [ "$WIFI_HOTSPOT" == "auto" ]&&[ "$WIFI_HOTSPOT_NIC" == "internal" ]; then	
 				echo "wifihotspot auto..."
 
 	        		# for both a and g ability choose opposite of video	   	         	
@@ -113,10 +107,13 @@ function hotspot_check_function {
 					echo "G Band only capable..."
 					HOTSPOT_BAND=g
 
-					if [ "$FREQ" -gt "2452" ]; then					
+					if [ "$FREQ" -gt "3000" ]; then					
 					HOTSPOT_CHANNEL=1
-					else	         			
-					HOTSPOT_CHANNEL=11
+					else	         							   			
+					echo "Hotspot Disabled. Not recommended to share same band as video..."	
+					echo "If you still want hotspot you must manually set up..."
+					#kill the function	
+					return 1
 					fi
 				fi
 	     		# NOTHING TO DO For user defined use of A (5.8ghz) OR G (2.4ghz) 
@@ -134,11 +131,24 @@ function hotspot_check_function {
 
 		/usr/sbin/dnsmasq --conf-file=/etc/dnsmasqWifi.conf
 	    	nice -n 5 hostapd -B -d /tmp/apconfig.txt
+		
+		#set wifihotspot to low power
+		iwconfig wifihotspot0 txpower 1mW
 
 	  	else
 	     	echo "NO HOTSPOT CAPABILTY WAS FOUND"
 		tmessage "no hotspot hardware found..."
-	  	fi   
+	  	fi 
+		
+		if [ "$HOTSPOT_TIMEOUT" != "0" ]; then
+			nice /home/pi/wifibroadcast-status/wbc_status "Hotspot Shutting Down in $HOTSPOT_TIMEOUT seconds" 7 55 0
+    			sleep $HOTSPOT_TIMEOUT
+			nice /home/pi/wifibroadcast-status/wbc_status "Hotspot Shutting Down in 10s" 7 55 0
+    			sleep 10
+   			killall hostapd
+			ps -ef | nice grep "wifihotspot" | nice grep -v grep | awk '{print $2}' | xargs kill -9
+			nice /home/pi/wifibroadcast-status/wbc_status "Hotspot Shut Down" 7 55 0
+		fi
 	fi
 
 

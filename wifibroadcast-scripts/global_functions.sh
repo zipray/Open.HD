@@ -132,6 +132,7 @@ function check_camera_attached {
         		grepRet=$?
         		if [[ $grepRet -eq 0 ]] ; then
 				echo  "1" > /tmp/cam
+				rm /tmp/CameraNotDetected
 				CAM="1"
 		        else
 				echo  "0" > /tmp/cam
@@ -195,33 +196,80 @@ function datarate_to_wifi_settings {
 		UPLINK_WIFI_BITRATE=11
 		TELEMETRY_WIFI_BITRATE=11
 		VIDEO_WIFI_BITRATE=5.5
+                if [ "$UseMCS" == "Y" ]; then
+                        UseMCS="1"
+                        VIDEO_WIFI_BITRATE="0"
+		else
+			UseMCS="0"
+		fi
 		;;
 		2)
 		UPLINK_WIFI_BITRATE=11
 		TELEMETRY_WIFI_BITRATE=11
 		VIDEO_WIFI_BITRATE=11
+                if [ "$UseMCS" == "Y" ]; then
+                        UseMCS="1"
+                        VIDEO_WIFI_BITRATE="1"
+                else
+                        UseMCS="0"
+                fi
 		;;
 		3)
 		UPLINK_WIFI_BITRATE=11
 		TELEMETRY_WIFI_BITRATE=12
 		VIDEO_WIFI_BITRATE=12
+                if [ "$UseMCS" == "Y" ]; then
+                        UseMCS="1"
+                        VIDEO_WIFI_BITRATE="1"
+                else
+                        UseMCS="0"
+                fi
 		;;
 		4)
 		UPLINK_WIFI_BITRATE=11
 		TELEMETRY_WIFI_BITRATE=19.5
 		VIDEO_WIFI_BITRATE=19.5
+                if [ "$UseMCS" == "Y" ]; then
+                        UseMCS="1"
+                        VIDEO_WIFI_BITRATE="2"
+                else
+                        UseMCS="0"
+                fi
 		;;
 		5)
 		UPLINK_WIFI_BITRATE=11
 		TELEMETRY_WIFI_BITRATE=24
 		VIDEO_WIFI_BITRATE=24
+                if [ "$UseMCS" == "Y" ]; then
+                        UseMCS="1"
+                        VIDEO_WIFI_BITRATE="3"
+                else
+                        UseMCS="0"
+                fi
 		;;
 		6)
 		UPLINK_WIFI_BITRATE=12
 		TELEMETRY_WIFI_BITRATE=36
 		VIDEO_WIFI_BITRATE=36
+                if [ "$UseMCS" == "Y" ]; then
+                        UseMCS="1"
+                        VIDEO_WIFI_BITRATE="4"
+                else
+                        UseMCS="0"
+                fi
 		;;
 	esac
+
+        if [ "$UseSTBC" == "Y" ]; then
+                UseSTBC="1"
+        else
+                UseSTBC="0"
+        fi
+        if [ "$UseLDPC" == "Y" ]; then
+                UseLDPC="1"
+        else
+                UseLDPC="0"
+        fi
 }
 
 function set_video_player_based_fps {
